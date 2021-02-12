@@ -30,6 +30,8 @@ STATE_BELOW_HORIZON = "below_horizon"
 
 STATE_ATTR_AZIMUTH = "azimuth"
 STATE_ATTR_ELEVATION = "elevation"
+STATE_ATTR_ELEVATION_PERIOD_HIGHPOINT = "elevation_highpoint"
+STATE_ATTR_ELEVATION_PERIOD_LOWPOINT  = "elevation_lowpoint"
 STATE_ATTR_RISING = "rising"
 STATE_ATTR_NEXT_DAWN = "next_dawn"
 STATE_ATTR_NEXT_DUSK = "next_dusk"
@@ -96,6 +98,9 @@ class Sun(Entity):
         self.next_dawn = self.next_dusk = None
         self.next_midnight = self.next_noon = None
         self.solar_elevation = self.solar_azimuth = None
+        self.solar_elevation_period_highpoint = None
+        self.solar_elevation_period_lowpoint = None
+        self.period = 30 # Minutes
         self.rising = self.phase = None
         self._next_change = None
 
@@ -134,6 +139,8 @@ class Sun(Entity):
             STATE_ATTR_NEXT_RISING: self.next_rising.isoformat(),
             STATE_ATTR_NEXT_SETTING: self.next_setting.isoformat(),
             STATE_ATTR_ELEVATION: self.solar_elevation,
+            STATE_ATTR_ELEVATION_PERIOD_HIGHPOINT: self.solar_elevation_period_highpoint,
+            STATE_ATTR_ELEVATION_PERIOD_LOWPOINT: self.solar_elevation_period_lowpoint,
             STATE_ATTR_AZIMUTH: self.solar_azimuth,
             STATE_ATTR_RISING: self.rising,
         }
@@ -226,6 +233,27 @@ class Sun(Entity):
         self.solar_elevation = round(
             self.location.solar_elevation(utc_point_in_time), 2
         )
+
+        # Figure solar highpoint and low-point over next period
+        utc_point_in_time_offset = utc_point_in_time + timedelta(minutes=self.period)
+        lowpoint = highpoint  = self.solar_elevation
+        elevation_at_offset   = self.location.solar_elevation(utc_point_in_time_offset)
+        elevation_at_noon     = self.location.solar_elevation(self.next_noon)
+        elevation_at_midnight = self.location.solar_elevation(self.next_midnight)
+        if self.rising and utc_point_in_time_offset < self.next_noon: # Sun is rising for entire period
+            highpoint = elevation_at_offset
+        elif self.rising and utc_point_in_time_offset > self.next_noon: # Sun will pass noon during period
+            lowpoint = min([lowpoint, elevation_at_offset])
+            highpoint = elevation_at_noon
+        elif not self.rising and utc_point_in_time_offset < self.next_midnight: # Sun is decreasing for entire period
+            lowpoint = elevation_at_offset
+        else: # Last case, sun passes midnight
+            lowpoint = elevation_at_midnight
+            highpoint = max([highpoint, elevation_at_offset])
+
+        self.solar_elevation_period_highpoint = round(highpoint, 2)
+        self.solar_elevation_period_lowpoint  = round(lowpoint , 2)
+
 
         _LOGGER.debug(
             "sun position_update@%s: elevation=%s azimuth=%s",
